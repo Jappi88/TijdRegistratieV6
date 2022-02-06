@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Printing;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
@@ -2021,34 +2022,24 @@ namespace Rpm.Misc
             return directory + "\\" + newfilename;
         }
 
-        public static Task PrintPDFWithAcrobat(string pdffile)
+        public static void PrintPDFWithAcrobat(string pdffile)
         {
-            return Task.Factory.StartNew(() =>
+            PrinterSettings printer = new PrinterSettings
             {
-                using PrintDialog Dialog = new PrintDialog();
-                Dialog.ShowDialog();
+                PrintFileName = pdffile
+            };
 
-                ProcessStartInfo printProcessInfo = new ProcessStartInfo()
-                {
-                    Verb = "print",
-                    CreateNoWindow = true,
-                    FileName = pdffile,
-                    WindowStyle = ProcessWindowStyle.Hidden
-                };
+            PrintDocument PrintDoc = new PrintDocument();
+            printer.PrintFileName = pdffile;
 
-                Process printProcess = new Process();
-                printProcess.StartInfo = printProcessInfo;
-                printProcess.Start();
-
-                printProcess.WaitForInputIdle();
-
-                Task.Delay(3000).Wait();
-
-                if (false == printProcess.CloseMainWindow())
-                {
-                    printProcess.Kill();
-                }
-            });
+            PrintDoc.DocumentName = Path.GetFileName(pdffile);
+            var xpr = new PrintDialog();
+            xpr.Document = PrintDoc;
+            xpr.PrintToFile = false;
+            if (xpr.ShowDialog() == DialogResult.OK)
+            {
+                xpr.Document.Print();
+            }
         }
 
         public static bool CleanupFilePath(this string filepath, string directorypath, string filename, bool move, bool rename)

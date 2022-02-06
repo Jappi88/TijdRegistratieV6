@@ -1,13 +1,15 @@
 ﻿using AutoUpdaterDotNET;
-using BrightIdeasSoftware;
-using Forms;
 using Forms.Aantal;
+using Forms.ArtikelRecords;
 using Forms.Excel;
 using MetroFramework;
+using MetroFramework.Forms;
 using ProductieManager.Forms;
 using ProductieManager.Properties;
 using ProductieManager.Rpm.Misc;
 using ProductieManager.Rpm.Various;
+using Rpm.Controls;
+using Rpm.DailyUpdate;
 using Rpm.Mailing;
 using Rpm.Misc;
 using Rpm.Productie;
@@ -24,20 +26,60 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Forms.ArtikelRecords;
-using MetroFramework.Forms;
-using Rpm.Controls;
-using Rpm.DailyUpdate;
+using Controls;
+using Controls.TileView;
 using Various;
 
-namespace Controls
+namespace Forms
 {
-    public partial class ProductieView : UserControl
+    public partial class ProductieView : Form
     {
+
+        #region Mainform
+        private string _bootDir;
+        private PathWatcher _dbWatcher;
+        /// <summary>
+        /// De titel van de hoofdscherm
+        /// </summary>
+        public string MainAppTitle
+        {
+            get => this.Text;
+            set => this.Text = value;
+        }
+
+        /// <summary>
+        /// Update de titel en status text
+        /// </summary>
+        public void UpdateTitle()
+        {
+            string xuser = Manager.LogedInGebruiker == null ? "Niet Ingelogd" : $"Ingelogd als: {Manager.LogedInGebruiker.Username}";
+            MainAppTitle = $"ProductieManager Versie {ProductVersion} {xuser}";
+            xstatuslabel.Text = $@"Database: {Manager.AppRootPath}";
+        }
+        /// <summary>
+        /// Of de hoofdscherm bezig is met laden
+        /// </summary>
+        public static bool IsLoading { get; private set; }
+        private SplashScreen _splash;
+        /// <summary>
+        /// De timer die ingesteld staat om te kijken voor nieuwe updates
+        /// </summary>
+        public Timer Updatechecker;
+
+        /// <summary>
+        /// Maak een nieuwe hoofdscherm aan
+        /// </summary>
         public ProductieView()
         {
+            //InitBootDir(bootdir);
             InitializeComponent();
-            metroTabControl.SelectedIndex = 0;
+            IsLoading = true;
+            SetStyle(
+                ControlStyles.UserPaint |
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer,
+                true);
+            Shown += Mainform_Shown;
             _specialRoosterWatcher = new Timer();
             _specialRoosterWatcher.Interval = 60000; //1 minuut;
             _specialRoosterWatcher.Tick += (x, y) => CheckForSpecialRooster(false);
@@ -49,8 +91,483 @@ namespace Controls
                 }
             };
             DailyMessage.DailyCreated += DailyMessage_DailyCreated;
+            //StickyWindow.RegisterExternalReferenceForm(this);
+            LoadManager();
         }
 
+        private void LoadManager()
+        {
+            AutoUpdater.AppCastURL = "https://www.dropbox.com/s/3bnp0so9o1mj8at/UpdateInfo.xml?dl=1";
+            AutoUpdater.AppTitle = "Productie Manager";
+            AutoUpdater.ShowSkipButton = false;
+            AutoUpdater.ApplicationExitEvent += AutoUpdater_ApplicationExitEvent;
+            this.WindowState = FormWindowState.Minimized;
+            Hide();
+            Manager.OnSettingsChanged += ProductieView1_OnSettingsChanged;
+            Manager.OnManagerLoaded += _manager_OnManagerLoaded;
+            Manager.OnRemoteMessage += _manager_OnRemoteMessage;
+
+            //Shown += Mainform_Shown;
+            //Task.Run(new Action(productieView1.LoadForm));
+            _splash = new SplashScreen(3000) { WindowState = FormWindowState.Normal };
+            _splash.Shown += _splash_Shown;
+            _splash.Closed += _splash_Closed;
+            _splash.Show();
+            _dbWatcher = new PathWatcher();
+            _dbWatcher.PathLocationFound += _DbWatcher_PathLocationFound;
+            _dbWatcher.PathLocationLost += _DbWatcher_PathLocationLost;
+        }
+
+        private void _splash_Closed(object sender, EventArgs e)
+        {
+            IsLoading = false;
+            _splash?.Dispose();
+            _splash = null;
+            StartPosition = FormStartPosition.CenterParent;
+            Application.DoEvents();
+            this.InitLastInfo();
+            this.Show();
+            Select();
+            BringToFront();
+            UpdateTitle();
+            ShowStartPagina();
+            AutoUpdater.Start();
+            Application.DoEvents();
+            ShowStartupForms();
+        }
+
+        private void AutoUpdater_ApplicationExitEvent()
+        {
+            Exit(false);
+        }
+
+        /// <summary>
+        /// Sluit de ProductieManager 
+        /// </summary>
+        /// <param name="restart">Of je de productiemanager wilt restarten</param>
+        public static async void Exit(bool restart)
+        {
+            var proc = Process.GetCurrentProcess();
+            if (proc.MainModule != null && restart)
+                Process.Start(proc.MainModule.FileName);
+            Manager.DefaultSettings?.SaveAsDefault();
+            if (Manager.Opties != null)
+            {
+                bool cancel = false;
+                var opties = Manager.Opties;
+                Manager.SettingsChanging(null, ref opties, ref cancel);
+                if (cancel) return;
+                Manager.Opties = opties;
+                await Manager.Opties.Save();
+            }
+            proc.Kill();
+        }
+        /// <summary>
+        /// Een event die aangeeft of de hoofd database niet meer bestaat
+        /// </summary>
+        /// <param name="sender">De gene die dat heeft geconstateerd</param>
+        /// <param name="e">Event informatie</param>
+        private void _DbWatcher_PathLocationLost(object sender, EventArgs e)
+        {
+            this.Invoke(new Action(DoDbLocationLost));
+        }
+
+        private async void DoDbLocationLost()
+        {
+            try
+            {
+                _dbWatcher?.Stop();
+                bool found = false;
+                for (int i = 0; i < 5; i++)
+                {
+                    if (Directory.Exists(Manager.DefaultSettings.MainDB.RootPath))
+                    {
+                        found = true;
+                        break;
+                    }
+
+                    await Task.Delay(400);
+                }
+
+                if (found) return;
+                Dictionary<string, DialogResult> xbtns = new Dictionary<string, DialogResult>
+                {
+                    {"Herstart", DialogResult.OK},
+                    {"Ga Offline", DialogResult.Cancel},
+                    {"Afsluiten", DialogResult.No},
+                    {"Kies DB", DialogResult.Yes}
+                };
+                var xrslt = XMessageBox.Show(this, $"Oorspronkelijke database kan niet geladen worden!\n\n" + " * Kies 'Herstart' als je de ProductieManager opnieuw wilt opstarten.\n" + " * Kies 'Offline' als je gewoon offline wilt werken.\n" + " * Kies anders voor een andere database of sluit de ProductieManager af.", "Database niet gevonden!", MessageBoxIcon.Warning, null, xbtns);
+                if (xrslt == DialogResult.OK)
+                {
+                    Application.Restart();
+                    return;
+                }
+
+                if (xrslt == DialogResult.No)
+                {
+                    this.Close();
+                    return;
+                }
+
+                if (xrslt == DialogResult.Yes)
+                {
+                    DbPathChooser ps = new DbPathChooser();
+                    if (ps.ShowDialog() == DialogResult.OK)
+                    {
+                        Manager.DefaultSettings.MainDB.RootPath = ps.SelectedPath;
+                        Exit(true);
+                        return;
+                    }
+                }
+
+                LoadManager(Manager.DefaultSettings.TempMainDB.RootPath, false);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+            _dbWatcher?.Start();
+        }
+
+        /// <summary>
+        /// Of de hoofd database weer is gevonden
+        /// </summary>
+        /// <param name="sender">De gene die dat heeft geconstateerd</param>
+        /// <param name="e">De event informatoie</param>
+        private void _DbWatcher_PathLocationFound(object sender, EventArgs e)
+        {
+            try
+            {
+                Exit(true);
+            }
+            catch (Exception ex)
+            {
+                _dbWatcher.PathLost = true;
+                Console.WriteLine(ex);
+            }
+        }
+
+        private void InitBootDir(string path = null)
+        {
+
+            _bootDir = Application.StartupPath;
+            Manager.AppRootPath = path ?? _bootDir;
+
+            if (Manager.DefaultSettings != null)
+            {
+                var dbent = Manager.DefaultSettings.MainDB;
+                var tempdbent = Manager.DefaultSettings.TempMainDB;
+                dbent ??= new DatabaseUpdateEntry()
+                {
+                    Naam = "Main Boot Dir",
+                    RootPath = Manager.DefaultSettings.MainDbPath ?? Application.StartupPath,
+                    UpdateDatabases =
+                        new List<DbType>()
+                        {
+                            DbType.Accounts,
+                            DbType.Producties,
+                            DbType.GereedProducties,
+                            DbType.Medewerkers,
+                            DbType.Opties
+                        }
+                };
+                tempdbent ??= new DatabaseUpdateEntry()
+                {
+                    Naam = "Temp Boot Dir",
+                    RootPath = Application.StartupPath,
+                    UpdateDatabases =
+                        new List<DbType>()
+                        {
+                            DbType.Accounts,
+                            DbType.Producties,
+                            DbType.GereedProducties,
+                            DbType.Medewerkers,
+                            DbType.Opties
+                        }
+                };
+                string rootpath = null;
+                for (int i = 0; i < 5; i++)
+                {
+                    try
+                    {
+                        if (Directory.Exists(dbent.RootPath))
+                        {
+                            rootpath = dbent.RootPath;
+                            break;
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        // ignored
+                    }
+
+                    Application.DoEvents();
+                }
+
+                if (rootpath != null)
+                {
+                    _bootDir = rootpath;
+                }
+                else
+                {
+                    tempdbent.RootPath = _bootDir;
+                    if (tempdbent.LastUpdated < dbent.LastUpdated || tempdbent.LastUpdated.IsDefault())
+                    {
+                        tempdbent.LastUpdated = DateTime.Now;
+                    }
+
+                }
+
+                Manager.DefaultSettings.MainDB = dbent;
+                Manager.DefaultSettings.TempMainDB = tempdbent;
+                Manager.DefaultSettings.SaveAsDefault();
+            }
+        }
+
+        private void _manager_OnRemoteMessage(RemoteMessage message, Manager instance)
+        {
+            ShowMessagePopup(message);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="msg"></param>
+        public void ShowMessagePopup(RemoteMessage msg)
+        {
+            if (msg == null) return;
+            if (Manager.Opties is { ToonLogNotificatie: false }) return;
+            try
+            {
+                //if (InvokeRequired)
+                //    BeginInvoke(new Action(msg.Notify));
+                //else
+                msg.Notify();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+            }
+        }
+
+        private void _manager_OnManagerLoaded()
+        {
+            if (this.InvokeRequired)
+                this.Invoke(new MethodInvoker(DoLoaded));
+            else DoLoaded();
+
+        }
+
+        private void DoLoaded()
+        {
+            if (_splash != null)
+            {
+                if (_splash.CanClose)
+                    _splash.Close();
+                else _splash.CanClose = true;
+
+            }
+            this.BeginInvoke(new Action(() => { _specialRoosterWatcher?.Start(); }));
+            _dbWatcher.WatchPath(Manager.DefaultSettings.MainDB.UpdatePath, false, true);
+            UpdateTitle();
+        }
+
+        private void _splash_Shown(object sender, EventArgs e)
+        {
+            IsLoading = true;
+            Task.Factory.StartNew(new Action(Action));
+            //BeginInvoke(new Action(Action));
+        }
+
+        private void Action()
+        {
+            this.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    InitBootDir();
+                    xversie.Text = $@"Versie {ProductVersion}";
+                    LoadManager(_bootDir, true);
+                    ShowUnreadMessage = true;
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e);
+                }
+            }));
+
+        }
+
+        private void Mainform_Shown(object sender, EventArgs e)
+        {
+            FormShown();
+            Invalidate();
+            Updatechecker = new Timer { Interval = 60000 };
+            Updatechecker.Tick += _updatechecker_Tick;
+            Updatechecker.Start();
+        }
+
+        private void _updatechecker_Tick(object sender, EventArgs e)
+        {
+            AutoUpdater.Start();
+        }
+
+        /// <summary>
+        /// Een event voor als de hoofdscherm zichtbaar is
+        /// </summary>
+        public event EventHandler OnFormShown;
+
+        private void CleanupUnusedDlls()
+        {
+            try
+            {
+                var asms = AppDomain.CurrentDomain.GetAssemblies();
+                var names = new List<AssemblyName>();
+                foreach (var asm in asms)
+                {
+                    var asmlibs = asm.GetReferencedAssemblies().Where(x =>
+                        !x.FullName.ToLower().StartsWith("system") &&
+                        !x.FullName.ToLower().StartsWith("mscorlib")).ToArray();
+                    foreach (var asmlib in asmlibs)
+                        if (!names.Any(x => x.Equals(asmlib)))
+                            names.Add(asmlib);
+                }
+
+                var dlls = Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory, "*.dll",
+                    SearchOption.TopDirectoryOnly);
+                foreach (var dll in dlls)
+                {
+                    var dllname = Path.GetFileNameWithoutExtension(dll);
+                    var dllasm = names.FirstOrDefault(x =>
+                        string.Equals(dllname, x.Name, StringComparison.CurrentCultureIgnoreCase));
+
+                    if (dllasm == null)
+                        File.Delete(dll);
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+            }
+        }
+
+        private void ProductieView1_OnSettingsChanged(object instance, UserSettings user, bool reinit)
+        {
+            try
+            {
+                BeginInvoke(new Action(UpdateTitle));
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+            }
+        }
+
+        private void mynotifyicon_Click()
+        {
+            if (WindowState == FormWindowState.Minimized)
+            {
+                Show();
+                WindowState = FormWindowState.Normal;
+            }
+        }
+
+        private void openenToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (WindowState == FormWindowState.Minimized)
+            {
+                Show();
+                WindowState = FormWindowState.Normal;
+            }
+        }
+
+        private void sluitenToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Close();
+        }
+
+        #region "Mainform"
+
+        private void Mainform_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            try
+            {
+                this.SetLastInfo();
+                try
+                {
+                    var forms = Application.OpenForms;
+                    for (int i = 0; i < forms.Count; i++)
+                    {
+                        var open = forms[i];
+                        if (string.IsNullOrEmpty(open.Name) || string.Equals(this.Name, open.Name, StringComparison.CurrentCultureIgnoreCase)) continue;
+                        open.Close();
+                    }
+                }
+                catch (Exception exception)
+                {
+                    Console.WriteLine(exception);
+                }
+
+                SaveLayouts();
+                Manager.DefaultSettings?.SaveAsDefault();
+                Manager.OnSettingsChanged -= ProductieView1_OnSettingsChanged;
+                Manager.OnManagerLoaded -= _manager_OnManagerLoaded;
+                Manager.OnRemoteMessage -= _manager_OnRemoteMessage;
+                Manager.ProductieProvider?.StopSync();
+                Manager.ProductieProvider?.DisableOfflineDb();
+                if (Manager.LogedInGebruiker != null)
+                    Manager.LogOut(this, false);
+                else Manager.SaveSettings(Manager.Opties, false, false, true);
+                DetachEvents();
+                //  _updatechecker?.Stop();
+                // _updatechecker = null;
+                //Manager.Database?.Dispose();
+                //ProductieView._manager?.Dispose();
+            }
+            catch (Exception)
+            {
+                // ignored
+            }
+        }
+
+        private void Mainform_Resize(object sender, EventArgs e)
+        {
+            if (this.WindowState == FormWindowState.Minimized && Manager.Opties is { MinimizeToTray: true })
+            {
+                this.Hide();
+                notifyIcon1.Visible = true;
+                notifyIcon1.Text = $@"ProductieManager Versie {Application.ProductVersion}";
+                notifyIcon1.ShowBalloonTip(5000);
+            }
+        }
+
+        #endregion "Mainform"
+
+        #region IMain Interface
+        /// <summary>
+        /// Toon de hoofdscherm
+        /// </summary>
+        public void ShowForm()
+        {
+            Show();
+        }
+
+        /// <summary>
+        /// Geef aan dat de hoofdscherm zichtbaar is
+        /// </summary>
+        protected void FormShown()
+        {
+            OnFormShown?.Invoke(this, EventArgs.Empty);
+        }
+
+        #endregion IMain Interface
+
+        private void notifyIcon1_MouseDoubleClick(object sender, MouseEventArgs e)
+        {
+
+        }
+        #endregion
         private void DailyMessage_DailyCreated(object sender, EventArgs e)
         {
             if (this.InvokeRequired)
@@ -156,10 +673,10 @@ namespace Controls
                 //xproductieListControl1.InitProductie(false, true, true, true, false, false);
                 
                 takenManager1.InitManager();
-                werkPlekkenUI1.InitUI(_manager);
+               // werkPlekkenUI1.InitUI(_manager);
                 InitEvents();
                 await _manager.Load(path, autologin, true, true);
-                xbewerkingListControl.InitProductie(true, true, true, true, false, false);
+                //xbewerkingListControl.InitProductie(true, true, true, true, false, false);
                 if (Manager.Opmerkingen != null)
                     Manager.Opmerkingen.OnOpmerkingenChanged += Opmerkingen_OnOpmerkingenChanged;
                 // _manager.StartMonitor();
@@ -215,6 +732,39 @@ namespace Controls
             }
         }
 
+        private TileMainView _mainpage;
+
+        private void ShowStartPagina()
+        {
+            try
+            {
+                if (_mainpage == null)
+                {
+                    _mainpage = new TileMainView();
+                    _mainpage.Text = "StartPagina";
+                    _mainpage.FormClosed += (x, y) =>
+                    {
+                        _mainpage?.Dispose();
+                        _mainpage = null;
+                    };
+                }
+
+                _mainpage.Show(dockPanel1);
+                if (_mainpage.WindowState == FormWindowState.Minimized)
+                    _mainpage.WindowState = FormWindowState.Normal;
+                mainMenu1.BringToFront();
+                takenManager1.BringToFront();
+                dockPanel1.BringToFront();
+                _mainpage.BringToFront();
+                _mainpage.Focus();
+               
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+            }
+        }
+
         public void InitEvents()
         {
             Manager.OnSettingsChanged += _manager_OnSettingsChanged;
@@ -241,14 +791,14 @@ namespace Controls
 
             _manager.OnShutdown += _manager_OnShutdown;
             //xproductieListControl1.InitEvents();
-            xbewerkingListControl.InitEvents();
+            //xbewerkingListControl.InitEvents();
             //xproductieListControl1.ItemCountChanged += XproductieListControl1_ItemCountChanged;
-            xbewerkingListControl.ItemCountChanged += XproductieListControl1_ItemCountChanged;
-            recentGereedMeldingenUI1.ItemCountChanged += XproductieListControl1_ItemCountChanged;
+            //xbewerkingListControl.ItemCountChanged += XproductieListControl1_ItemCountChanged;
+           // recentGereedMeldingenUI1.ItemCountChanged += XproductieListControl1_ItemCountChanged;
             //xproductieListControl1.SelectedItemChanged += XproductieListControl1_SelectedItemChanged;
-            werkPlekkenUI1.InitEvents();
-            werkPlekkenUI1.OnRequestOpenWerk += WerkPlekkenUI1_OnRequestOpenWerk;
-            werkPlekkenUI1.OnPlekkenChanged += WerkPlekkenUI1_OnPlekkenChanged;
+            //werkPlekkenUI1.InitEvents();
+           // werkPlekkenUI1.OnRequestOpenWerk += WerkPlekkenUI1_OnRequestOpenWerk;
+           // werkPlekkenUI1.OnPlekkenChanged += WerkPlekkenUI1_OnPlekkenChanged;
         }
 
         private DialogResult Manager_RequestRespondDialog(object sender, string message, string title, MessageBoxButtons buttons, MessageBoxIcon icon, string[] chooseitems = null, Dictionary<string, DialogResult> custombuttons = null, Image customImage = null, MetroColorStyle style = MetroColorStyle.Default)
@@ -298,19 +848,19 @@ namespace Controls
             if (_manager != null)
                 _manager.OnShutdown -= _manager_OnShutdown;
             //xproductieListControl1.DetachEvents();
-            xbewerkingListControl.DetachEvents();
-            //productieListControl1.ItemCountChanged -= XproductieListControl1_ItemCountChanged;
-            xbewerkingListControl.ItemCountChanged -= XproductieListControl1_ItemCountChanged;
-            recentGereedMeldingenUI1.ItemCountChanged -= XproductieListControl1_ItemCountChanged;
-            werkPlekkenUI1.DetachEvents();
-            werkPlekkenUI1.OnRequestOpenWerk -= WerkPlekkenUI1_OnRequestOpenWerk;
-            werkPlekkenUI1.OnPlekkenChanged -= WerkPlekkenUI1_OnPlekkenChanged;
+            //xbewerkingListControl.DetachEvents();
+            ////productieListControl1.ItemCountChanged -= XproductieListControl1_ItemCountChanged;
+            //xbewerkingListControl.ItemCountChanged -= XproductieListControl1_ItemCountChanged;
+            //recentGereedMeldingenUI1.ItemCountChanged -= XproductieListControl1_ItemCountChanged;
+            //werkPlekkenUI1.DetachEvents();
+            //werkPlekkenUI1.OnRequestOpenWerk -= WerkPlekkenUI1_OnRequestOpenWerk;
+            //werkPlekkenUI1.OnPlekkenChanged -= WerkPlekkenUI1_OnPlekkenChanged;
         }
 
         public void SaveLayouts()
         {
-            xbewerkingListControl.SaveColumns(false);
-            recentGereedMeldingenUI1.productieListControl1.SaveColumns(false);
+            //xbewerkingListControl.SaveColumns(false);
+            //recentGereedMeldingenUI1.productieListControl1.SaveColumns(false);
         }
 
         private void Manager_VerpakkingDeleted(object sender, EventArgs e)
@@ -458,8 +1008,8 @@ namespace Controls
         {
             try
             {
-                BeginInvoke(new MethodInvoker(() => werkPlekkenUI1.LoadPlekken(true)));
-                BeginInvoke(new MethodInvoker(recentGereedMeldingenUI1.LoadBewerkingen));
+                //BeginInvoke(new MethodInvoker(() => werkPlekkenUI1.LoadPlekken(true)));
+                //BeginInvoke(new MethodInvoker(recentGereedMeldingenUI1.LoadBewerkingen));
             }
             catch (Exception exception)
             {
@@ -505,7 +1055,7 @@ namespace Controls
                         {
                             //xsettings.ViewDataProductieState = xproductieListControl1.ProductieLijst.SaveState();
                             //xsettings.ViewDataBewerkingenState = xbewerkingListControl.ProductieLijst.SaveState();
-                            xsettings.ViewDataWerkplekState = werkPlekkenUI1.xwerkpleklist.SaveState();
+                            //xsettings.ViewDataWerkplekState = werkPlekkenUI1.xwerkpleklist.SaveState();
                             //xsettings.ViewDataRecentProductieState =
                             //    recentGereedMeldingenUI1.ProductieLijst.SaveState();
                         }
@@ -519,7 +1069,7 @@ namespace Controls
                     {
                         //xsettings.ViewDataProductieState = xproductieListControl1.ProductieLijst.SaveState();
                         //xsettings.ViewDataBewerkingenState = xbewerkingListControl.ProductieLijst.SaveState();
-                        xsettings.ViewDataWerkplekState = werkPlekkenUI1.xwerkpleklist.SaveState();
+                        //xsettings.ViewDataWerkplekState = werkPlekkenUI1.xwerkpleklist.SaveState();
                         //xsettings.ViewDataRecentProductieState = recentGereedMeldingenUI1.ProductieLijst.SaveState();
                     }
                     catch (Exception e)
@@ -560,8 +1110,8 @@ namespace Controls
 
                         //if (Manager.Opties?._viewbewdata != null)
                         //    xbewerkingListControl.ProductieLijst.RestoreState(Manager.Opties.ViewDataBewerkingenState);
-                        if (Manager.Opties?._viewwerkplekdata != null)
-                            werkPlekkenUI1.xwerkpleklist.RestoreState(Manager.Opties.ViewDataWerkplekState);
+                        //if (Manager.Opties?._viewwerkplekdata != null)
+                        //    werkPlekkenUI1.xwerkpleklist.RestoreState(Manager.Opties.ViewDataWerkplekState);
                         //if (Manager.Opties?._viewrecentproddata != null)
                         //    recentGereedMeldingenUI1.ProductieLijst.RestoreState(Manager.Opties
                         //        .ViewDataRecentProductieState);
@@ -573,9 +1123,9 @@ namespace Controls
 
                         //LoadFilter();
                         _manager.SetSettings(settings);
-                        werkPlekkenUI1.LoadPlekken(true);
+                        //werkPlekkenUI1.LoadPlekken(true);
                         CheckForSpecialRooster(false);
-                        recentGereedMeldingenUI1.LoadBewerkingen();
+                        //recentGereedMeldingenUI1.LoadBewerkingen();
                         this.Invalidate();
                         //Manager.Taken?.StartBeheer();
                         //if (Manager.IsLoaded)
@@ -614,13 +1164,6 @@ namespace Controls
             {
                 Console.WriteLine(e);
             }
-        }
-
-        private void _manager_OnManagerLoaded()
-        {
-            if (IsDisposed || Disposing) return;
-            this.BeginInvoke(new Action(() => { _specialRoosterWatcher?.Start();}));
-
         }
 
         private void InitDBCorupptedMonitor()
@@ -916,54 +1459,54 @@ namespace Controls
 
         private void DoOpenProductiePdf()
         {
-            switch (metroTabControl.SelectedIndex)
-            {
-                case 0: 
-                    if (xbewerkingListControl.SelectedItem is Bewerking bew) bew.Parent?.OpenProductiePdf();
-                    break;
-                case 2: //werkplekken
-                    var plek = werkPlekkenUI1.SelectedWerkplek;
-                    plek?.Werk?.Parent?.OpenProductiePdf();
-                    break;
-            }
+            //switch (metroTabControl.SelectedIndex)
+            //{
+            //    case 0: 
+            //        if (xbewerkingListControl.SelectedItem is Bewerking bew) bew.Parent?.OpenProductiePdf();
+            //        break;
+            //    case 2: //werkplekken
+            //        var plek = werkPlekkenUI1.SelectedWerkplek;
+            //        plek?.Werk?.Parent?.OpenProductiePdf();
+            //        break;
+            //}
         }
 
         private void DoPdfEnabled()
         {
-            mainMenu1.Enable("xbekijkproductiepdf", false);
-            switch (metroTabControl.SelectedIndex)
-            {
-                case 0: //producties
-                    if (xbewerkingListControl.SelectedItem is Bewerking bew)
-                        mainMenu1.Enable("xbekijkproductiepdf",
-                            bew.Parent != null && bew.Parent.ContainsProductiePdf());
-                    break;
-                case 2: //werkplekken
-                    var plek = werkPlekkenUI1.SelectedWerkplek;
-                    if (plek != null)
-                        mainMenu1.Enable("xbekijkproductiepdf",
-                            plek.Werk?.Parent != null && plek.Werk.Parent.ContainsProductiePdf());
-                    break;
-            }
+            //mainMenu1.Enable("xbekijkproductiepdf", false);
+            //switch (metroTabControl.SelectedIndex)
+            //{
+            //    case 0: //producties
+            //        if (xbewerkingListControl.SelectedItem is Bewerking bew)
+            //            mainMenu1.Enable("xbekijkproductiepdf",
+            //                bew.Parent != null && bew.Parent.ContainsProductiePdf());
+            //        break;
+            //    case 2: //werkplekken
+            //        var plek = werkPlekkenUI1.SelectedWerkplek;
+            //        if (plek != null)
+            //            mainMenu1.Enable("xbekijkproductiepdf",
+            //                plek.Werk?.Parent != null && plek.Werk.Parent.ContainsProductiePdf());
+            //        break;
+            //}
         }
 
         private void SelectProductieItem(object item)
         {
-            if (item is ProductieFormulier form)
-            {
-                //xproductieListControl1.SelectedItem = form;
-                metroTabControl.SelectedIndex = 0;
-            }
-            else if (item is Bewerking bew)
-            {
-                xbewerkingListControl.SelectedItem = bew;
-                metroTabControl.SelectedIndex = 0;
-            }
-            else if (item is WerkPlek plek)
-            {
-                werkPlekkenUI1.SelectedWerkplek = plek;
-                metroTabControl.SelectedIndex = 1;
-            }
+            //if (item is ProductieFormulier form)
+            //{
+            //    //xproductieListControl1.SelectedItem = form;
+            //    metroTabControl.SelectedIndex = 0;
+            //}
+            //else if (item is Bewerking bew)
+            //{
+            //    xbewerkingListControl.SelectedItem = bew;
+            //    metroTabControl.SelectedIndex = 0;
+            //}
+            //else if (item is WerkPlek plek)
+            //{
+            //    werkPlekkenUI1.SelectedWerkplek = plek;
+            //    metroTabControl.SelectedIndex = 1;
+            //}
         }
 
         private async void DoEigenRooster()
@@ -1362,10 +1905,10 @@ namespace Controls
 
         private void WerkPlekkenUI1_OnPlekkenChanged(object sender, EventArgs e)
         {
-            if (sender is ObjectListView olv)
-                tabPage3.Text = olv.Items.Count == 0
-                    ? "Geen Actieve Werkplekken"
-                    : $"Actieve Werkplekken [{olv.Items.Count}]";
+           // if (sender is ObjectListView olv)
+                //tabPage3.Text = olv.Items.Count == 0
+                    //? "Geen Actieve Werkplekken"
+                    //: $"Actieve Werkplekken [{olv.Items.Count}]";
         }
 
         private void WerkPlekkenUI1_OnRequestOpenWerk(object sender, EventArgs e)
@@ -1649,12 +2192,12 @@ namespace Controls
 
         private void UpdateTabCounts()
         {
-            BeginInvoke(new MethodInvoker(() =>
-            {
-                //tabPage1.Text = $"Producties [{xproductieListControl1.ProductieLijst.Items.Count}]";
-                tabPage2.Text = $"Bewerkingen [{xbewerkingListControl.ProductieLijst.Items.Count}]";
-                tabPage4.Text = $"Recente Gereedmeldingen [{recentGereedMeldingenUI1.ItemCount}]";
-            }));
+            //BeginInvoke(new MethodInvoker(() =>
+            //{
+            //    //tabPage1.Text = $"Producties [{xproductieListControl1.ProductieLijst.Items.Count}]";
+            //    //tabPage2.Text = $"Bewerkingen [{xbewerkingListControl.ProductieLijst.Items.Count}]";
+            //   // tabPage4.Text = $"Recente Gereedmeldingen [{recentGereedMeldingenUI1.ItemCount}]";
+            //}));
         }
 
         private XMessageBox _unreadMessages;
@@ -2493,19 +3036,19 @@ namespace Controls
             {
                 if (taak.Plek != null)
                 {
-                    werkPlekkenUI1.xwerkpleklist.SelectedObject = taak.Plek;
-                    if (werkPlekkenUI1.xwerkpleklist.SelectedItem != null)
-                    {
-                        metroTabControl.SelectedIndex = 1;
-                        werkPlekkenUI1.xwerkpleklist.SelectedItem.EnsureVisible();
-                        return;
-                    }
+                    //werkPlekkenUI1.xwerkpleklist.SelectedObject = taak.Plek;
+                    //if (werkPlekkenUI1.xwerkpleklist.SelectedItem != null)
+                    //{
+                    //    metroTabControl.SelectedIndex = 1;
+                    //    werkPlekkenUI1.xwerkpleklist.SelectedItem.EnsureVisible();
+                    //    return;
+                    //}
                 }
 
                 if (taak.Bewerking != null)
                 {
-                    xbewerkingListControl.SelectedItem = taak.Bewerking;
-                    if (xbewerkingListControl.SelectedItem != null) metroTabControl.SelectedIndex = 0;
+                    //xbewerkingListControl.SelectedItem = taak.Bewerking;
+                    //if (xbewerkingListControl.SelectedItem != null) metroTabControl.SelectedIndex = 0;
                 }
                 //else
                 //{

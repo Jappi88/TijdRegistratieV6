@@ -27,7 +27,6 @@
     <UpdateRequired>false</UpdateRequired>
     <MapFileExtensions>false</MapFileExtensions>
     <InstallUrl>\\Server\ProductieManager\</InstallUrl>
-    <TargetCulture>nl-NL</TargetCulture>
     <ProductName>Productie Manager</ProductName>
     <PublisherName>Ihab</PublisherName>
     <SuiteName>Productie Manager</SuiteName>
@@ -37,10 +36,10 @@
     <AutorunEnabled>true</AutorunEnabled>
     <ApplicationRevision>0</ApplicationRevision>
     <ApplicationVersion>3.2.8.%2a</ApplicationVersion>
-    <UseApplicationTrust>false</UseApplicationTrust>
+    <UseApplicationTrust>true</UseApplicationTrust>
     <CreateDesktopShortcut>true</CreateDesktopShortcut>
     <PublishWizardCompleted>true</PublishWizardCompleted>
-    <BootstrapperEnabled>true</BootstrapperEnabled>
+    <BootstrapperEnabled>false</BootstrapperEnabled>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
@@ -48,14 +47,15 @@
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
     <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>TRACE</DefineConstants>
+    <DefineConstants>TRACE;CODE_ANALYSIS</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <LangVersion>9.0</LangVersion>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <Prefer32Bit>false</Prefer32Bit>
-    <DocumentationFile>bin\Debug\ProductieManager.xml</DocumentationFile>
-    <GenerateSerializationAssemblies>Auto</GenerateSerializationAssemblies>
+    <DocumentationFile>
+    </DocumentationFile>
+    <GenerateSerializationAssemblies>On</GenerateSerializationAssemblies>
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
     <RunCodeAnalysis>true</RunCodeAnalysis>
   </PropertyGroup>
@@ -75,6 +75,8 @@
     <CodeAnalysisIgnoreGeneratedCode>true</CodeAnalysisIgnoreGeneratedCode>
     <DocumentationFile>
     </DocumentationFile>
+    <GenerateSerializationAssemblies>Auto</GenerateSerializationAssemblies>
+    <DebugSymbols>true</DebugSymbols>
   </PropertyGroup>
   <PropertyGroup>
     <StartupObject>ProductieManager.Program</StartupObject>
@@ -112,13 +114,19 @@
     <DelaySign>false</DelaySign>
   </PropertyGroup>
   <PropertyGroup />
-  <PropertyGroup>
-    <ApplicationManifest>Properties\app.manifest</ApplicationManifest>
-  </PropertyGroup>
+  <PropertyGroup />
   <PropertyGroup>
     <RunPostBuildEvent>OnBuildSuccess</RunPostBuildEvent>
   </PropertyGroup>
+  <PropertyGroup />
+  <PropertyGroup />
+  <PropertyGroup>
+    <ApplicationManifest>Properties\app.manifest</ApplicationManifest>
+  </PropertyGroup>
   <ItemGroup>
+    <Reference Include="BouncyCastle.Crypto">
+      <HintPath>..\..\..\Desktop\ProductieManager Libs\BouncyCastle.Crypto.dll</HintPath>
+    </Reference>
     <Reference Include="CircularProgressBar">
       <HintPath>..\Libraries\CircularProgressBar.dll</HintPath>
       <EmbedInteropTypes>False</EmbedInteropTypes>
@@ -287,6 +295,19 @@
     </Compile>
     <Compile Include="Controls\ProductieVerbruikUI.Designer.cs">
       <DependentUpon>ProductieVerbruikUI.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Controls\TileView\Tile.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\TileView\Tile.Designer.cs">
+      <DependentUpon>Tile.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Controls\TileView\TileInfoEntry.cs" />
+    <Compile Include="Controls\TileView\TileMainView.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Controls\TileView\TileMainView.Designer.cs">
+      <DependentUpon>TileMainView.cs</DependentUpon>
     </Compile>
     <Compile Include="Controls\TileView\TileViewer.cs">
       <SubType>UserControl</SubType>
@@ -474,10 +495,10 @@
     <Compile Include="Controls\ProductieForm.Designer.cs">
       <DependentUpon>ProductieForm.cs</DependentUpon>
     </Compile>
-    <Compile Include="Controls\ProductieView.cs">
-      <SubType>UserControl</SubType>
+    <Compile Include="ProductieView.cs">
+      <SubType>Form</SubType>
     </Compile>
-    <Compile Include="Controls\ProductieView.Designer.cs">
+    <Compile Include="ProductieView.Designer.cs">
       <DependentUpon>ProductieView.cs</DependentUpon>
     </Compile>
     <Compile Include="Controls\TakenManager.cs">
@@ -1075,12 +1096,6 @@
     <Compile Include="Forms\WijzigProductie.Designer.cs">
       <DependentUpon>WijzigProductie.cs</DependentUpon>
     </Compile>
-    <Compile Include="Mainform.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Mainform.Designer.cs">
-      <DependentUpon>Mainform.cs</DependentUpon>
-    </Compile>
     <Compile Include="Forms\Indeling.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -1303,8 +1318,8 @@
     <EmbeddedResource Include="Controls\ProductieVerbruikUI.resx">
       <DependentUpon>ProductieVerbruikUI.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="Controls\TileView\TileViewer.resx">
-      <DependentUpon>TileViewer.cs</DependentUpon>
+    <EmbeddedResource Include="Controls\TileView\TileMainView.resx">
+      <DependentUpon>TileMainView.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Forms\Aantal\AantalHistoryForm.resx">
       <DependentUpon>AantalHistoryForm.cs</DependentUpon>
@@ -1390,8 +1405,9 @@
     <EmbeddedResource Include="Controls\ProductieForm.resx">
       <DependentUpon>ProductieForm.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="Controls\ProductieView.resx">
+    <EmbeddedResource Include="ProductieView.resx">
       <DependentUpon>ProductieView.cs</DependentUpon>
+      <SubType>Designer</SubType>
     </EmbeddedResource>
     <EmbeddedResource Include="Controls\TakenManager.resx">
       <DependentUpon>TakenManager.cs</DependentUpon>
@@ -1697,9 +1713,6 @@
     <EmbeddedResource Include="Forms\WijzigProductie.resx">
       <DependentUpon>WijzigProductie.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="Mainform.resx">
-      <DependentUpon>Mainform.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="Forms\Indeling.resx">
       <DependentUpon>Indeling.cs</DependentUpon>
     </EmbeddedResource>
@@ -1715,29 +1728,8 @@
       <SubType>Designer</SubType>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
-    <EmbeddedResource Include="Rpm\AutoUpdater\Forms\DownloadUpdateDialog.nl-NL.resx">
-      <DependentUpon>DownloadUpdateDialog.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Rpm\AutoUpdater\Forms\DownloadUpdateDialog.nl.resx">
-      <DependentUpon>DownloadUpdateDialog.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="Rpm\AutoUpdater\Forms\DownloadUpdateDialog.resx">
       <DependentUpon>DownloadUpdateDialog.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Rpm\AutoUpdater\Forms\RemindLaterForm.nl-NL.resx">
-      <DependentUpon>RemindLaterForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Rpm\AutoUpdater\Forms\RemindLaterForm.nl.resx">
-      <DependentUpon>RemindLaterForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Rpm\AutoUpdater\Forms\RemindLaterForm.resx">
-      <DependentUpon>RemindLaterForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Rpm\AutoUpdater\Forms\UpdateForm.nl-NL.resx">
-      <DependentUpon>UpdateForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Rpm\AutoUpdater\Forms\UpdateForm.nl.resx">
-      <DependentUpon>UpdateForm.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Rpm\AutoUpdater\Forms\UpdateForm.resx">
       <DependentUpon>UpdateForm.cs</DependentUpon>
@@ -1868,6 +1860,8 @@
     <None Include="Resources\logo-vanderValk.png" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Resources\home_icon_32x32.png" />
+    <None Include="Resources\printer_15747_32x32.png" />
     <None Include="Resources\documents_32x32.png" />
     <None Include="Resources\extension_file_documents_32x32.png" />
     <None Include="Resources\layout_widget_icon_32x32.png" />
@@ -2168,18 +2162,7 @@
       <Install>false</Install>
     </BootstrapperPackage>
   </ItemGroup>
-  <ItemGroup>
-    <PublishFile Include="ProductieManager.pdb">
-      <Visible>False</Visible>
-      <Group>
-      </Group>
-      <TargetPath>
-      </TargetPath>
-      <PublishState>Include</PublishState>
-      <IncludeHash>True</IncludeHash>
-      <FileType>File</FileType>
-    </PublishFile>
-  </ItemGroup>
+  <ItemGroup />
   <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- Code to merge the assemblies into one:setup.exe -->

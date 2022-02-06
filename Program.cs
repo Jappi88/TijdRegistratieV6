@@ -4,6 +4,7 @@ using System;
 using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
+using Forms;
 
 namespace ProductieManager
 {
@@ -19,7 +20,7 @@ namespace ProductieManager
             //AppDomain.CurrentDomain.AssemblyResolve += OnResolveAssembly;
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Mainform());
+            Application.Run(new ProductieView());
         }
 
         /// <summary>

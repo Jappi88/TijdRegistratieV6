@@ -10,6 +10,7 @@ using Rpm.Various;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using PdfSharp.Drawing;
@@ -710,6 +711,25 @@ namespace Controls
             var bw = CurrentBewerking();
             if (bw == null) return;
             new AantalMonitorForm(bw).ShowDialog();
+        }
+
+        private void contextMenuStrip1_Opening(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            var bw = CurrentBewerking();
+           // productieFormulierPrintenToolStripMenuItem.Enabled = bw?.Parent != null && bw.Parent.ContainsProductiePdf();
+        }
+
+        private void productieFormulierPrintenToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var prod = CurrentBewerking()?.Parent;
+            if (prod != null)
+            {
+                var xprod = prod.GetProductieFormulierPDF();
+                if (!string.IsNullOrEmpty(xprod) && File.Exists(xprod))
+                {
+                    System.Diagnostics.Process.Start(xprod);
+                }
+            }
         }
     }
 }
